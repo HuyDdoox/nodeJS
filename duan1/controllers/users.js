@@ -1,0 +1,270 @@
+const mongoose = require('mongoose');
+const Users = require('../models/user');
+
+// Lấy toàn bộ danh sách người dùng
+const getAllUsers = async (req, res, next) => {
+    try {
+        let data = await Users.find();
+        let users = data.map(u => ({
+            id: u._id,
+            username: u.username,
+            email: u.email,
+            fullname: u.fullname,
+            phone: u.phone,
+            role: u.role,
+            status: u.status !== undefined ? u.status : true,
+            createdAt: u.createdAt
+        }));
+        res.json(users);
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+}
+
+// Lấy thông tin chi tiết một người dùng dựa trên ID
+const getUserById = async (req, res, next) => {
+    try {
+        let id = req.params.id;
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(500).json({ message: "Invalid user ID format" });
+        }
+        let user = await Users.findById(id);
+        if (!user) {
+            return res.status(500).json({ message: "User not found" });
+        }
+        res.status(200).json({
+            id: user._id,
+            username: user.username,
+            email: user.email,
+            fullname: user.fullname,
+            phone: user.phone,
+            role: user.role,
+            status: user.status !== undefined ? user.status : true,
+            createdAt: user.createdAt
+        });
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+}
+
+// Thêm mới một người dùng (Đăng ký)
+const createUser = async (req, res, next) => {
+    try {
+        let { username, password, email, fullname, phone, role, status } = req.body;
+        
+        if (!username || !password || !email) {
+            return res.status(500).json({ message: "Username, password, and email are required" });
+        }
+
+        const existingUser = await Users.findOne({ $or: [{ username }, { email }] });
+        if (existingUser) {
+            return res.status(500).json({ message: "Username or email already exists" });
+        }
+
+        let userStatus = true;
+        if (status !== undefined) {
+            userStatus = !(status === false || status === 'false' || status === 0 || status === '0' || status === 'hidden' || status === 'hide' || status === 'blocked');
+        }
+
+        const newUser = new Users({
+            username: username.trim(),
+            password,
+            email: email.trim(),
+            fullname,
+            phone,
+            role: role || 'user',
+            status: userStatus
+        });
+
+        const savedUser = await newUser.save();
+        res.status(201).json({
+            id: savedUser._id,
+            username: savedUser.username,
+            email: savedUser.email,
+            fullname: savedUser.fullname,
+            phone: savedUser.phone,
+            role: savedUser.role,
+            status: savedUser.status,
+            createdAt: savedUser.createdAt
+        });
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+}
+
+// Cập nhật thông tin người dùng theo ID (hỗ trợ sửa thông tin và ẩn/hiện / khóa tài khoản)
+const updateUser = async (req, res, next) => {
+    try {
+        let id = req.params.id || req.body.id;
+
+        if (!id) {
+            return res.status(500).json({ message: "User ID is required" });
+        }
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(500).json({ message: "Invalid user ID format" });
+        }
+
+        const user = await Users.findById(id);
+        if (!user) {
+            return res.status(500).json({ message: "User not found" });
+        }
+
+        let { username, password, email, fullname, phone, role, status, isHidden } = req.body;
+
+        // Validate username nếu có cập nhật
+        if (username !== undefined) {
+            username = username.trim();
+            if (!username) {
+                return res.status(500).json({ message: "Username cannot be empty" });
+            }
+            const existingUser = await Users.findOne({ username, _id: { $ne: id } });
+            if (existingUser) {
+                return res.status(500).json({ message: "Username already exists" });
+            }
+        }
+
+        // Validate email nếu có cập nhật
+        if (email !== undefined) {
+            email = email.trim();
+            if (!email) {
+                return res.status(500).json({ message: "Email cannot be empty" });
+            }
+            const existingUser = await Users.findOne({ email, _id: { $ne: id } });
+            if (existingUser) {
+                return res.status(500).json({ message: "Email already exists" });
+            }
+        }
+
+        // Validate role nếu có cập nhật
+        if (role !== undefined && !['user', 'admin'].includes(role)) {
+            return res.status(500).json({ message: "Role must be 'user' or 'admin'" });
+        }
+
+        // Xử lý trạng thái ẩn / hiện / khóa tài khoản (status: true = hoạt động, false = khóa / ẩn)
+        let userStatus;
+        if (status !== undefined) {
+            if (status === false || status === 'false' || status === 0 || status === '0' || status === 'hidden' || status === 'hide' || status === 'blocked' || status === 'locked') {
+                userStatus = false; // Khóa / Ẩn
+            } else {
+                userStatus = true; // Hoạt động / Hiện
+            }
+        } else if (isHidden !== undefined) {
+            if (isHidden === true || isHidden === 'true' || isHidden === 1 || isHidden === '1') {
+                userStatus = false; // Khóa / Ẩn
+            } else {
+                userStatus = true; // Hoạt động / Hiện
+            }
+        }
+
+        const updateData = {};
+        if (username !== undefined) updateData.username = username;
+        if (password !== undefined) updateData.password = password;
+        if (email !== undefined) updateData.email = email;
+        if (fullname !== undefined) updateData.fullname = fullname;
+        if (phone !== undefined) updateData.phone = phone;
+        if (role !== undefined) updateData.role = role;
+        if (userStatus !== undefined) updateData.status = userStatus;
+
+        const updatedUser = await Users.findByIdAndUpdate(
+            id,
+            updateData,
+            { new: true, runValidators: true }
+        ).select('-password');
+
+        res.status(200).json(updatedUser);
+
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+}
+
+// Thay đổi trạng thái ẩn / hiện (khóa / mở khóa) người dùng
+const changeUserStatus = async (req, res, next) => {
+    try {
+        let id = req.params.id || req.body.id;
+
+        if (!id) {
+            return res.status(500).json({ message: "User ID is required" });
+        }
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(500).json({ message: "Invalid user ID format" });
+        }
+
+        const user = await Users.findById(id);
+        if (!user) {
+            return res.status(500).json({ message: "User not found" });
+        }
+
+        let { status, isHidden } = req.body;
+        let newStatus;
+
+        if (status !== undefined) {
+            newStatus = !(status === false || status === 'false' || status === 0 || status === '0' || status === 'hidden' || status === 'hide' || status === 'blocked' || status === 'locked');
+        } else if (isHidden !== undefined) {
+            newStatus = !(isHidden === true || isHidden === 'true' || isHidden === 1 || isHidden === '1');
+        } else {
+            // Tự động toggle (hoạt động <-> khóa)
+            newStatus = user.status !== undefined ? !user.status : false;
+        }
+
+        user.status = newStatus;
+        const updatedUser = await user.save();
+
+        res.status(200).json({
+            message: newStatus ? "Tài khoản hiện đang hoạt động" : "Tài khoản đã bị khóa (ẩn)",
+            user: {
+                id: updatedUser._id,
+                username: updatedUser.username,
+                email: updatedUser.email,
+                fullname: updatedUser.fullname,
+                phone: updatedUser.phone,
+                role: updatedUser.role,
+                status: updatedUser.status,
+                createdAt: updatedUser.createdAt
+            }
+        });
+
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+}
+
+// Xóa người dùng dựa trên ID
+const deleteUser = async (req, res, next) => {
+    try {
+        let id = req.params.id || req.body.id;
+
+        if (!id) {
+            return res.status(500).json({ message: "User ID is required" });
+        }
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(500).json({ message: "Invalid user ID format" });
+        }
+
+        const deletedUser = await Users.findByIdAndDelete(id).select('-password');
+        if (!deletedUser) {
+            return res.status(500).json({ message: "User not found" });
+        }
+
+        res.status(200).json({
+            message: "User deleted successfully",
+            deletedUser
+        });
+
+    } catch (err) {
+        res.status(500).json({ message: err.message });
+    }
+}
+
+module.exports = { 
+    getAllUsers, 
+    getUserById, 
+    createUser,
+    updateUser,
+    updateUsers: updateUser,
+    changeUser: updateUser,
+    changeUsers: updateUser,
+    changeUserStatus,
+    deleteUser,
+    deleteUsers: deleteUser
+};
