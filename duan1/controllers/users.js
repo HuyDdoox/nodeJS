@@ -15,8 +15,10 @@ const getAllUsers = async (req, res, next) => {
             status: u.status !== undefined ? u.status : true,
             createdAt: u.createdAt
         }));
-        res.json(users);
+        // 200: Xử lý thành công
+        res.status(200).json(users);
     } catch (err) {
+        // 500: Lỗi phía Server
         res.status(500).json({ message: err.message });
     }
 }
@@ -25,13 +27,16 @@ const getAllUsers = async (req, res, next) => {
 const getUserById = async (req, res, next) => {
     try {
         let id = req.params.id;
+        // 400: Sai định dạng ID
         if (!mongoose.Types.ObjectId.isValid(id)) {
-            return res.status(500).json({ message: "Invalid user ID format" });
+            return res.status(400).json({ message: "Invalid user ID format" });
         }
         let user = await Users.findById(id);
+        // 404: Không tìm thấy người dùng
         if (!user) {
-            return res.status(500).json({ message: "User not found" });
+            return res.status(404).json({ message: "User not found" });
         }
+        // 200: Thành công
         res.status(200).json({
             id: user._id,
             username: user.username,
@@ -52,13 +57,22 @@ const createUser = async (req, res, next) => {
     try {
         let { username, password, email, fullname, phone, role, status } = req.body;
         
+        // 400: Thiếu trường bắt buộc
         if (!username || !password || !email) {
-            return res.status(500).json({ message: "Username, password, and email are required" });
+            return res.status(400).json({ message: "Username, password, and email are required" });
         }
 
+        username = username.trim();
+        email = email.trim();
+
+        if (!username || !email) {
+            return res.status(400).json({ message: "Username and email cannot be empty" });
+        }
+
+        // 409: Xung đột dữ liệu đã tồn tại (trùng username hoặc email)
         const existingUser = await Users.findOne({ $or: [{ username }, { email }] });
         if (existingUser) {
-            return res.status(500).json({ message: "Username or email already exists" });
+            return res.status(409).json({ message: "Username or email already exists" });
         }
 
         let userStatus = true;
@@ -67,9 +81,9 @@ const createUser = async (req, res, next) => {
         }
 
         const newUser = new Users({
-            username: username.trim(),
+            username: username,
             password,
-            email: email.trim(),
+            email: email,
             fullname,
             phone,
             role: role || 'user',
@@ -77,6 +91,7 @@ const createUser = async (req, res, next) => {
         });
 
         const savedUser = await newUser.save();
+        // 201: Tạo mới thành công
         res.status(201).json({
             id: savedUser._id,
             username: savedUser.username,
@@ -88,71 +103,72 @@ const createUser = async (req, res, next) => {
             createdAt: savedUser.createdAt
         });
     } catch (err) {
+        // 500: Lỗi Server
         res.status(500).json({ message: err.message });
     }
 }
 
-// Cập nhật thông tin người dùng theo ID (hỗ trợ sửa thông tin và ẩn/hiện / khóa tài khoản)
+// Cập nhật thông tin người dùng theo ID
 const updateUser = async (req, res, next) => {
     try {
         let id = req.params.id || req.body.id;
 
         if (!id) {
-            return res.status(500).json({ message: "User ID is required" });
+            return res.status(400).json({ message: "User ID is required" });
         }
         if (!mongoose.Types.ObjectId.isValid(id)) {
-            return res.status(500).json({ message: "Invalid user ID format" });
+            return res.status(400).json({ message: "Invalid user ID format" });
         }
 
         const user = await Users.findById(id);
         if (!user) {
-            return res.status(500).json({ message: "User not found" });
+            return res.status(404).json({ message: "User not found" });
         }
 
         let { username, password, email, fullname, phone, role, status, isHidden } = req.body;
 
-        // Validate username nếu có cập nhật
+        // Validate username
         if (username !== undefined) {
             username = username.trim();
             if (!username) {
-                return res.status(500).json({ message: "Username cannot be empty" });
+                return res.status(400).json({ message: "Username cannot be empty" });
             }
             const existingUser = await Users.findOne({ username, _id: { $ne: id } });
             if (existingUser) {
-                return res.status(500).json({ message: "Username already exists" });
+                return res.status(409).json({ message: "Username already exists" });
             }
         }
 
-        // Validate email nếu có cập nhật
+        // Validate email
         if (email !== undefined) {
             email = email.trim();
             if (!email) {
-                return res.status(500).json({ message: "Email cannot be empty" });
+                return res.status(400).json({ message: "Email cannot be empty" });
             }
             const existingUser = await Users.findOne({ email, _id: { $ne: id } });
             if (existingUser) {
-                return res.status(500).json({ message: "Email already exists" });
+                return res.status(409).json({ message: "Email already exists" });
             }
         }
 
-        // Validate role nếu có cập nhật
+        // Validate role
         if (role !== undefined && !['user', 'admin'].includes(role)) {
-            return res.status(500).json({ message: "Role must be 'user' or 'admin'" });
+            return res.status(400).json({ message: "Role must be 'user' or 'admin'" });
         }
 
-        // Xử lý trạng thái ẩn / hiện / khóa tài khoản (status: true = hoạt động, false = khóa / ẩn)
+        // Xử lý trạng thái ẩn / hiện / khóa tài khoản
         let userStatus;
         if (status !== undefined) {
             if (status === false || status === 'false' || status === 0 || status === '0' || status === 'hidden' || status === 'hide' || status === 'blocked' || status === 'locked') {
-                userStatus = false; // Khóa / Ẩn
+                userStatus = false;
             } else {
-                userStatus = true; // Hoạt động / Hiện
+                userStatus = true;
             }
         } else if (isHidden !== undefined) {
             if (isHidden === true || isHidden === 'true' || isHidden === 1 || isHidden === '1') {
-                userStatus = false; // Khóa / Ẩn
+                userStatus = false;
             } else {
-                userStatus = true; // Hoạt động / Hiện
+                userStatus = true;
             }
         }
 
@@ -184,15 +200,15 @@ const changeUserStatus = async (req, res, next) => {
         let id = req.params.id || req.body.id;
 
         if (!id) {
-            return res.status(500).json({ message: "User ID is required" });
+            return res.status(400).json({ message: "User ID is required" });
         }
         if (!mongoose.Types.ObjectId.isValid(id)) {
-            return res.status(500).json({ message: "Invalid user ID format" });
+            return res.status(400).json({ message: "Invalid user ID format" });
         }
 
         const user = await Users.findById(id);
         if (!user) {
-            return res.status(500).json({ message: "User not found" });
+            return res.status(404).json({ message: "User not found" });
         }
 
         let { status, isHidden } = req.body;
@@ -203,7 +219,6 @@ const changeUserStatus = async (req, res, next) => {
         } else if (isHidden !== undefined) {
             newStatus = !(isHidden === true || isHidden === 'true' || isHidden === 1 || isHidden === '1');
         } else {
-            // Tự động toggle (hoạt động <-> khóa)
             newStatus = user.status !== undefined ? !user.status : false;
         }
 
@@ -235,15 +250,15 @@ const deleteUser = async (req, res, next) => {
         let id = req.params.id || req.body.id;
 
         if (!id) {
-            return res.status(500).json({ message: "User ID is required" });
+            return res.status(400).json({ message: "User ID is required" });
         }
         if (!mongoose.Types.ObjectId.isValid(id)) {
-            return res.status(500).json({ message: "Invalid user ID format" });
+            return res.status(400).json({ message: "Invalid user ID format" });
         }
 
         const deletedUser = await Users.findByIdAndDelete(id).select('-password');
         if (!deletedUser) {
-            return res.status(500).json({ message: "User not found" });
+            return res.status(404).json({ message: "User not found" });
         }
 
         res.status(200).json({

@@ -10,36 +10,38 @@ const Category = require('../models/categories');
 const getAllCategories = async (req, res, next) => {
     try {
         // trả về nguyên collection trong mongo(_id, _v)
-        let data = await Category.find()
+        let data = await Category.find();
         // gán biến categories dữ liệu đã được map lại và tuỳ chỉnh
         // bỏ các trường không cần thiết (_id, _v)
-        let categories = data.map(c =>
-        ({
+        let categories = data.map(c => ({
             id: c._id,
             name: c.name,
             description: c.description,
             status: c.status !== undefined ? c.status : true
-        })
-        )
-        res.json(categories);
+        }));
+        res.status(200).json(categories);
     } catch (err) {
-        res.status(500).json({ message: err.message })
+        // 5xx: Lỗi xử lý từ phía server
+        res.status(500).json({ message: err.message });
     }
 }
+
 // Lấy thông tin chi tiết một danh mục theo ID
 const getCategoryById = async (req, res, next) => {
     try {
         let id = req.params.id;
+        // 400: Client gửi ID sai định dạng
         if (!mongoose.Types.ObjectId.isValid(id)) {
-            return res.status(500).json({ message: "Invalid category ID format" });
+            return res.status(400).json({ message: "Invalid category ID format" });
         }
-        // Sử dụng Category thay vì category (phân biệt chữ hoa/thường)
         let cate = await Category.findById(id);
         
+        // 404: Không tìm thấy tài nguyên theo yêu cầu của Client
         if (!cate) {
-            return res.status(500).json({ message: "Category not found" });
+            return res.status(404).json({ message: "Category not found" });
         }
 
+        // 200: Xử lý thành công
         res.status(200).json({
             id: cate._id,
             name: cate.name,
@@ -48,36 +50,46 @@ const getCategoryById = async (req, res, next) => {
         });
         
     } catch (err) {
+        // 500: Lỗi phía Server
         res.status(500).json({ message: err.message });
     }
 }
+
 // Lấy thông tin chi tiết một danh mục theo tên
-const getCategoryByName = async(req,res,next) =>{
-    try{
-        let data = await Category.findOne({name:req.params.name})
-        res.json(data);
-    }catch(err){
-        res.status(500).json({message: err.message})
+const getCategoryByName = async (req, res, next) => {
+    try {
+        let name = req.params.name;
+        let data = await Category.findOne({ name: name });
+        if (!data) {
+            return res.status(404).json({ message: "Category not found" });
+        }
+        res.status(200).json(data);
+    } catch (err) {
+        res.status(500).json({ message: err.message });
     }
 }
+
 // Thêm mới một danh mục vào cơ sở dữ liệu
-const createCategory = async(req,res,next) =>{
-    try{
+const createCategory = async (req, res, next) => {
+    try {
+        let { name, description, status } = req.body;
 
-        let {name, description, status} = req.body // destructuring
-
-        //validate dữ liệu
-        if(!req.body.name || !req.body.description) {
-            return res.status(500).json({message: "Name and description are required"})
+        // 400: Lỗi Client - thiếu trường bắt buộc
+        if (!name || !description) {
+            return res.status(400).json({ message: "Name and description are required" });
         }
 
-        name=name.trim();
-        description=description.trim();
+        name = name.trim();
+        description = description.trim();
 
-        //check category name
-        let category = await Category.findOne({name:req.body.name})
-        if(category){
-            return res.status(500).json({message: "Category already exists"})
+        if (!name || !description) {
+            return res.status(400).json({ message: "Name and description cannot be empty" });
+        }
+
+        // 409: Lỗi Client - Xung đột dữ liệu đã tồn tại (Duplicate)
+        let category = await Category.findOne({ name: name });
+        if (category) {
+            return res.status(409).json({ message: "Category already exists" });
         }
 
         let categoryStatus = true;
@@ -92,10 +104,12 @@ const createCategory = async(req,res,next) =>{
         });
 
         await newCategories.save();
+        // 201: Tạo mới thành công
         res.status(201).json(newCategories);
         
-    }catch(err){
-        res.status(500).json({message: err.message})
+    } catch (err) {
+        // 500: Lỗi phát sinh trong quá trình server thực thi
+        res.status(500).json({ message: err.message });
     }
 }
 
@@ -104,16 +118,18 @@ const updateCategory = async (req, res, next) => {
     try {
         let id = req.params.id || req.body.id;
 
+        // 400: Client không truyền ID hoặc ID sai định dạng
         if (!id) {
-            return res.status(500).json({ message: "Category ID is required" });
+            return res.status(400).json({ message: "Category ID is required" });
         }
         if (!mongoose.Types.ObjectId.isValid(id)) {
-            return res.status(500).json({ message: "Invalid category ID format" });
+            return res.status(400).json({ message: "Invalid category ID format" });
         }
 
         const cate = await Category.findById(id);
+        // 404: Không tìm thấy danh mục để cập nhật
         if (!cate) {
-            return res.status(500).json({ message: "Category not found" });
+            return res.status(404).json({ message: "Category not found" });
         }
 
         let { name, description, status, isHidden } = req.body;
@@ -122,12 +138,12 @@ const updateCategory = async (req, res, next) => {
         if (name !== undefined) {
             name = name.trim();
             if (!name) {
-                return res.status(500).json({ message: "Category name cannot be empty" });
+                return res.status(400).json({ message: "Category name cannot be empty" });
             }
-            // Kiểm tra trùng tên danh mục với danh mục khác
+            // 409: Trùng tên với danh mục khác đã tồn tại
             const existingCate = await Category.findOne({ name, _id: { $ne: id } });
             if (existingCate) {
-                return res.status(500).json({ message: "Category name already exists" });
+                return res.status(409).json({ message: "Category name already exists" });
             }
         }
 
@@ -162,6 +178,7 @@ const updateCategory = async (req, res, next) => {
             { new: true, runValidators: true }
         );
 
+        // 200: Cập nhật thành công
         res.status(200).json(updatedCategory);
 
     } catch (err) {
@@ -175,15 +192,15 @@ const changeCategoryStatus = async (req, res, next) => {
         let id = req.params.id || req.body.id;
 
         if (!id) {
-            return res.status(500).json({ message: "Category ID is required" });
+            return res.status(400).json({ message: "Category ID is required" });
         }
         if (!mongoose.Types.ObjectId.isValid(id)) {
-            return res.status(500).json({ message: "Invalid category ID format" });
+            return res.status(400).json({ message: "Invalid category ID format" });
         }
 
         const cate = await Category.findById(id);
         if (!cate) {
-            return res.status(500).json({ message: "Category not found" });
+            return res.status(404).json({ message: "Category not found" });
         }
 
         let { status, isHidden } = req.body;
@@ -217,15 +234,15 @@ const deleteCategory = async (req, res, next) => {
         let id = req.params.id || req.body.id;
 
         if (!id) {
-            return res.status(500).json({ message: "Category ID is required" });
+            return res.status(400).json({ message: "Category ID is required" });
         }
         if (!mongoose.Types.ObjectId.isValid(id)) {
-            return res.status(500).json({ message: "Invalid category ID format" });
+            return res.status(400).json({ message: "Invalid category ID format" });
         }
 
         const deletedCategory = await Category.findByIdAndDelete(id);
         if (!deletedCategory) {
-            return res.status(500).json({ message: "Category not found" });
+            return res.status(404).json({ message: "Category not found" });
         }
 
         res.status(200).json({
@@ -251,4 +268,3 @@ module.exports = {
     deleteCategory,
     deleteCategories: deleteCategory
 };
-

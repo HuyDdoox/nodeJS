@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const Products = require('../models/product');
-const Category = require('../models/categories'); // Đã sửa từ category thành categories
+const Category = require('../models/categories');
+
 // Lấy toàn bộ danh sách sản phẩm
 const getAllProducts = async (req, res, next) => {
     try {
@@ -17,72 +18,76 @@ const getAllProducts = async (req, res, next) => {
             status: p.status !== undefined ? p.status : true,
             category: p.category
         }));
-        res.json(products);
+        // 200: Xử lý thành công
+        res.status(200).json(products);
     } catch (err) {
+        // 500: Lỗi Server
         res.status(500).json({ message: err.message });
     }
 }
-// //add product
-// id: { type: ObjectId }, //khóa chính
-//     name: { type: String, required: true, unique: true },
-//     price: { type: Number },
-//     quantity: { type: Number },
-//     image: { type: String },
-//     description: { type: String },
-//     stock: { type: Number, required: true, min: 0, default: 0 },
-//     sold: { type: Number, required: true, min: 0 },
-//     createdAt: { type: Date, default: Date.now }, // 
-//     vairiant: { type: [variant] },
-//     category: { type: ObjectId, ref: 'categories' }, //khóa ngoại
-// Thêm mới một sản phẩm vào cơ sở dữ liệu
-const createProduct = async(req,res,next) => {
-    try {
-        let { name, price, quantity, image, description,sold,category} = req.body;
 
-        // 1. Kiểm tra bắt buộc validate (Phải kiểm tra trước khi dùng .trim() để tránh lỗi crash do biến bị undefined)
-        if (!name || !price || !quantity || !image || !description || !category) {
-            return res.status(500).json({ message: "All fields are required" });
+// Thêm mới một sản phẩm vào cơ sở dữ liệu
+const createProduct = async (req, res, next) => {
+    try {
+        let { name, price, quantity, image, description, stock, sold, category } = req.body;
+
+        // 400: Lỗi Client - Kiểm tra thiếu trường bắt buộc
+        if (!name || price === undefined || quantity === undefined || !image || !description || !category) {
+            return res.status(400).json({ message: "All fields (name, price, quantity, image, description, category) are required" });
         }
 
         name = name.trim();
         description = description.trim();
 
-        // 2. check giá
-        if(isNaN(price) || Number(price) < 0) {
-            return res.status(500).json({ message: "Price must be a valid positive number" });
+        if (!name || !description) {
+            return res.status(400).json({ message: "Name and description cannot be empty" });
+        }
+
+        // 400: Lỗi Client - Giá không hợp lệ
+        if (isNaN(price) || Number(price) < 0) {
+            return res.status(400).json({ message: "Price must be a valid positive number" });
         }
         
-        // 3. check số lượng
-        if(isNaN(quantity) || Number(quantity) < 0) {
-            return res.status(500).json({ message: "Quantity must be a valid positive number" });
+        // 400: Lỗi Client - Số lượng không hợp lệ
+        if (isNaN(quantity) || Number(quantity) < 0) {
+            return res.status(400).json({ message: "Quantity must be a valid positive number" });
         }
-        //4 check category id
+
+        // 400: Lỗi Client - Định dạng ID danh mục không đúng
+        if (!mongoose.Types.ObjectId.isValid(category)) {
+            return res.status(400).json({ message: "Invalid category ID format" });
+        }
+
+        // 404: Lỗi Client - Danh mục không tồn tại
         const existingCategory = await Category.findById(category);
         if (!existingCategory) {
-            return res.status(500).json({ message: "Category does not exist" });
+            return res.status(404).json({ message: "Category does not exist" });
         }
 
-        // 5. Kiểm tra trùng tên (nếu muốn)
+        // 409: Lỗi Client - Trùng tên sản phẩm
         const existingProduct = await Products.findOne({ name });
         if (existingProduct) {
-            return res.status(500).json({ message: "Product already exists" });
+            return res.status(409).json({ message: "Product already exists" });
         }
 
-        // 6. Create product
+        // Create product
         const newProduct = new Products({
             name,
             price: Number(price),
             quantity: Number(quantity),
             image,
             description,
-            sold: Number(sold),
+            stock: (stock !== undefined && !isNaN(stock)) ? Number(stock) : 0,
+            sold: (sold !== undefined && !isNaN(sold)) ? Number(sold) : 0,
             category: existingCategory._id
         });
 
         const savedProduct = await newProduct.save();
+        // 201: Tạo mới thành công
         res.status(201).json(savedProduct);
 
     } catch (err) {
+        // 500: Lỗi Server
         res.status(500).json({ message: err.message });
     }
 }
@@ -91,10 +96,18 @@ const createProduct = async(req,res,next) => {
 const getProductById = async (req, res, next) => {
     try {
         let id = req.params.id;
+
+        // 400: Sai định dạng ID
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({ message: "Invalid product ID format" });
+        }
+
         let product = await Products.findById(id).populate('category');
+        // 404: Không tìm thấy sản phẩm
         if (!product) {
             return res.status(404).json({ message: "Product not found" });
         }
+        // 200: Thành công
         res.status(200).json(product);
     } catch (err) {
         res.status(500).json({ message: err.message });
@@ -105,6 +118,12 @@ const getProductById = async (req, res, next) => {
 const getProductsByCategory = async (req, res, next) => {
     try {
         let categoryId = req.params.id;
+
+        // 400: Sai định dạng category ID
+        if (!mongoose.Types.ObjectId.isValid(categoryId)) {
+            return res.status(400).json({ message: "Invalid category ID format" });
+        }
+
         let products = await Products.find({ category: categoryId }).populate('category');
         res.status(200).json(products);
     } catch (err) {
@@ -128,72 +147,71 @@ const updateProducts = async (req, res, next) => {
     try {
         let id = req.params.id || req.body.id;
 
-        // 1. Kiểm tra ID có được truyền vào không và đúng định dạng ObjectId không
+        // 400: Lỗi Client
         if (!id) {
-            return res.status(500).json({ message: "Product ID is required" });
+            return res.status(400).json({ message: "Product ID is required" });
         }
         if (!mongoose.Types.ObjectId.isValid(id)) {
-            return res.status(500).json({ message: "Invalid product ID format" });
+            return res.status(400).json({ message: "Invalid product ID format" });
         }
 
-        // 2. Kiểm tra sản phẩm có tồn tại trong database không
+        // 404: Không tìm thấy sản phẩm để cập nhật
         const product = await Products.findById(id);
         if (!product) {
-            return res.status(500).json({ message: "Product not found" });
+            return res.status(404).json({ message: "Product not found" });
         }
 
         let { name, price, quantity, image, description, stock, sold, category, status, isHidden } = req.body;
 
-        // 3. Validate dữ liệu đầu vào
-        // Kiểm tra tên sản phẩm nếu có cập nhật
+        // Validate tên sản phẩm nếu có cập nhật
         if (name !== undefined) {
             name = name.trim();
             if (!name) {
-                return res.status(500).json({ message: "Product name cannot be empty" });
+                return res.status(400).json({ message: "Product name cannot be empty" });
             }
-            // Kiểm tra trùng tên với sản phẩm khác (ngoại trừ chính sản phẩm này)
+            // 409: Trùng tên với sản phẩm khác
             const existingProduct = await Products.findOne({ name, _id: { $ne: id } });
             if (existingProduct) {
-                return res.status(500).json({ message: "Product name already exists" });
+                return res.status(409).json({ message: "Product name already exists" });
             }
         }
 
-        // Kiểm tra giá nếu có cập nhật
+        // Validate giá
         if (price !== undefined) {
             if (isNaN(price) || Number(price) < 0) {
-                return res.status(500).json({ message: "Price must be a valid positive number" });
+                return res.status(400).json({ message: "Price must be a valid positive number" });
             }
         }
 
-        // Kiểm tra số lượng nếu có cập nhật
+        // Validate số lượng
         if (quantity !== undefined) {
             if (isNaN(quantity) || Number(quantity) < 0) {
-                return res.status(500).json({ message: "Quantity must be a valid positive number" });
+                return res.status(400).json({ message: "Quantity must be a valid positive number" });
             }
         }
 
-        // Kiểm tra tồn kho (stock) nếu có cập nhật
+        // Validate tồn kho
         if (stock !== undefined) {
             if (isNaN(stock) || Number(stock) < 0) {
-                return res.status(500).json({ message: "Stock must be a valid positive number" });
+                return res.status(400).json({ message: "Stock must be a valid positive number" });
             }
         }
 
-        // Kiểm tra số lượng đã bán (sold) nếu có cập nhật
+        // Validate số lượng đã bán
         if (sold !== undefined) {
             if (isNaN(sold) || Number(sold) < 0) {
-                return res.status(500).json({ message: "Sold must be a valid positive number" });
+                return res.status(400).json({ message: "Sold must be a valid positive number" });
             }
         }
 
-        // Kiểm tra category nếu có cập nhật
+        // Validate category
         if (category !== undefined) {
             if (!mongoose.Types.ObjectId.isValid(category)) {
-                return res.status(500).json({ message: "Invalid category ID format" });
+                return res.status(400).json({ message: "Invalid category ID format" });
             }
             const existingCategory = await Category.findById(category);
             if (!existingCategory) {
-                return res.status(500).json({ message: "Category does not exist" });
+                return res.status(404).json({ message: "Category does not exist" });
             }
         }
 
@@ -217,7 +235,6 @@ const updateProducts = async (req, res, next) => {
             }
         }
 
-        // 4. Tạo đối tượng cập nhật
         const updateData = {};
         if (name !== undefined) updateData.name = name;
         if (price !== undefined) updateData.price = Number(price);
@@ -229,13 +246,13 @@ const updateProducts = async (req, res, next) => {
         if (category !== undefined) updateData.category = category;
         if (productStatus !== undefined) updateData.status = productStatus;
 
-        // 5. Cập nhật vào cơ sở dữ liệu
         const updatedProduct = await Products.findByIdAndUpdate(
             id,
             updateData,
             { new: true, runValidators: true }
         ).populate('category');
 
+        // 200: Cập nhật thành công
         res.status(200).json(updatedProduct);
 
     } catch (err) {
@@ -249,15 +266,15 @@ const changeProductStatus = async (req, res, next) => {
         let id = req.params.id || req.body.id;
 
         if (!id) {
-            return res.status(500).json({ message: "Product ID is required" });
+            return res.status(400).json({ message: "Product ID is required" });
         }
         if (!mongoose.Types.ObjectId.isValid(id)) {
-            return res.status(500).json({ message: "Invalid product ID format" });
+            return res.status(400).json({ message: "Invalid product ID format" });
         }
 
         const product = await Products.findById(id);
         if (!product) {
-            return res.status(500).json({ message: "Product not found" });
+            return res.status(404).json({ message: "Product not found" });
         }
 
         let { status, isHidden } = req.body;
@@ -291,18 +308,16 @@ const deleteProducts = async (req, res, next) => {
     try {
         let id = req.params.id || req.body.id;
 
-        // 1. Kiểm tra ID có được truyền vào không và đúng định dạng ObjectId không
         if (!id) {
-            return res.status(500).json({ message: "Product ID is required" });
+            return res.status(400).json({ message: "Product ID is required" });
         }
         if (!mongoose.Types.ObjectId.isValid(id)) {
-            return res.status(500).json({ message: "Invalid product ID format" });
+            return res.status(400).json({ message: "Invalid product ID format" });
         }
 
-        // 2. Kiểm tra và xóa sản phẩm trong database
         const deletedProduct = await Products.findByIdAndDelete(id);
         if (!deletedProduct) {
-            return res.status(500).json({ message: "Product not found" });
+            return res.status(404).json({ message: "Product not found" });
         }
 
         res.status(200).json({ 
